@@ -1,0 +1,286 @@
+---
+output: html_document
+title: Activity Prediction Based on Wearable Device Sensor Data
+subtitle: Prediction Assignment Writeup
+date: 2015-07-16
+---
+
+## Summary
+
+This study used data from wearable device sensors to predict human activity.
+A combined model (randomForest, gbm, treebag) was used to achieve an
+estimated out-of-sample error on the cross-validation dataset of less than 1%.
+
+
+
+## Introduction
+
+This study uses data from mobile accelerometers on the belt, 
+forearm, arm, and dumbell of 6 participants. 
+They were asked to perform barbell lifts correctly and incorrectly in 5 
+different ways. 
+More information for this study is available from the website: 
+http://groupware.les.inf.puc-rio.br/har. 
+
+The training data for this project are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The datasets contain 5 activity classes:
+sitting-down (A), standing-up (B), standing (C), walking (D), and sitting (E).
+
+Both data sets were downloaded on July 15. 2015.
+
+The goal of this study is to predict the human activity ("classe" variable) 
+on the test data cases.
+
+This report describes
+
+* how a combined model is built
+* how cross-validation is used
+* what the expected out-of-sample error is
+
+The model is than used to predict the activity of 
+20 test cases in the test data set.
+
+
+```{r, echo=FALSE, results='hide'}
+## set working directory
+setwd("E://MyDocuments/UNIVERSITIES/COURSERA - Practical Machine Learning/course project/code")
+getwd()
+
+```
+
+
+## Loading the training data
+```{r}
+data=read.csv("../data/pml-training.csv")
+dim(data)
+```
+
+The training data contains 19622 rows and 160 columns.
+
+
+## Cleaning the training data
+
+After some exploratory data analysis, several actions were taken to clean the data:
+```{r}
+# remove column 'X' from data 
+data <- data[,-1]  # id for each case
+
+# remove columns with mostly (>95%) NAs in it
+data <- data[,colSums(is.na(data)) < (nrow(data)*0.95)]
+
+# remove columns which contains mostly (>95%) empty cells
+data <- data[,colSums(data=="") < (nrow(data)*0.95)]
+dim(data)
+```
+
+The resulting training data set contains now only 59 columns.
+
+
+## Get a random sample of the training data
+
+The training data set contains about 20000 rows.
+This takes very long to train the different models.
+Therefore a sample of 2000 rows is drawn for further processing.
+Exploratory analysis showed that this is sufficient for building 
+the prediction models.
+
+```{r}
+set.seed(98765)  # set seed for reproducability
+sampleLength <- 2000
+dataSample <- data[sample(nrow(data),sampleLength),]
+```
+
+
+## Sub-divide the training data into a training and validation set
+
+The training data is sub-divided into a training set (75%) and a
+validation set (25%).
+The training set is used to train the models.
+The validation set is used to estimate the out-of-sample error.
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+require(caret)
+require(randomForest)
+require(gbm)
+require(ipred)
+require(plyr)
+```
+
+```{r}
+# divide the random sample into training and validation set
+inTrain = createDataPartition(dataSample$classe, p = 3/4)[[1]]
+training = dataSample[ inTrain,]
+validation = dataSample[-inTrain,]
+dim(training); dim(validation)
+```
+
+
+## Training different models
+
+Three methods will be used for training the models:
+randomForest, gbm, and treebag
+
+### randomForest model
+```{r, results='hide'}
+modRf <- train(classe~., method="rf", data=training)
+# modRf$finalModel$confusion
+```
+
+### gbm model
+```{r, results='hide'}
+# gbm
+modGbm <- train(classe~., method="gbm", data=training)
+# modGbm$finalModel
+```
+
+### treebag model
+```{r results='hide', warning=FALSE}
+modTreebag <- train(classe~., method="treebag", data=training)
+# modTreebag$finalModel
+```
+
+
+## Cross-validate the different models
+
+To get an estimation of the out-of-sample error,
+the different models are tested on the validation data set
+(the out-of-sample error is the error rate of a model on a completely new data set).
+Confusion matrix was used to determine the error rate (1-accuracy).
+
+### randomForest model
+```{r}
+predictRf <- predict(modRf, validation)
+cmRf <- confusionMatrix(predictRf, validation$classe)
+acc <- cmRf$overall[[1]]
+errorRf <- 1-acc
+errorRf
+```
+The estimated out-of-sample error of the randomForest model is `r errorRf`.
+
+
+### gbm model
+```{r}
+predictGbm <- predict(modGbm, validation)
+cmGbm <- confusionMatrix(predictGbm, validation$classe)
+acc <- cmGbm$overall[[1]]
+errorGbm <- 1-acc
+errorGbm
+```
+The estimated out-of-sample error of the gbm model is `r errorGbm`.
+
+### treebag model
+```{r}
+predictTreebag <- predict(modTreebag, validation)
+cmTreebag <- confusionMatrix(predictTreebag, validation$classe)
+acc <- cmTreebag$overall[[1]]
+errorTreebag <- 1-acc
+errorTreebag
+```
+The estimated out-of-sample error of the treebag model is `r errorTreebag`.
+
+
+## Fitting a combined model
+
+The results of the 3 models are now used as data to train a combined model 
+(method: randomForest).
+The the out-of-sample error of the combined model is determined.
+
+```{r}
+combResults <- data.frame(predictRf, predictGbm, predictTreebag, classe=validation$classe)
+modComb <- train(classe ~.,method="rf",data=combResults)
+predictComb <- predict(modComb,combResults)
+cmComb <- confusionMatrix(predictComb, validation$classe)
+acc <- cmComb$overall[[1]]
+errorComb <- 1-acc
+errorComb
+```
+The estimated out-of-sample error of the combined model is `r errorComb`.
+
+
+## Evaluation of the models
+
+The out-of-sample errors of the different models - 
+calculated on the validation data - are:
+
+* randomForest model:   `r errorRf`
+* gbm model:            `r errorGbm`
+* treebag model:        `r errorTreebag`
+* Combined model:       `r errorComb`
+
+The model with the smallest out-of-sample error estimation is the combined model.
+
+Therefore the combined model will be used for predicting the 
+human activity (classe variable) on the test data set.
+The estimation of the error is expected to be equal or higher than `r errorComb`.
+
+
+## Predicting activity on the test data
+
+The 3 different models were used to predict the classe of the testing data test cases.
+The testing data contains 20 different test cases.
+
+
+### Loading the test data
+```{r}
+test=read.csv("../data/pml-testing.csv")
+dim(test)
+```
+The test data contains 20 cases.
+
+### Predicting the activity (classe) of the test cases
+
+The combined model is based on the prediction results of the three base models.
+Therefore the activity is first predicted for these base models.
+
+```{r}
+predRf <- predict(modRf, test)
+predGbm <- predict(modGbm, test)
+predTreebag <- predict(modTreebag, test)
+```
+
+Based on these prediction results the combined model was used to predict the 
+final result of the classe variable - used for submission.
+```{r}
+combResults <- data.frame(predictRf=predRf, predictGbm=predGbm, predictTreebag=predTreebag)
+predComb <- predict(modComb,combResults)
+predComb
+```
+
+
+```{r, echo=FALSE}
+# B A B A A E D B A A B C B A E E A B B B
+```
+
+The prediction result: `r predComb` (20 classe values for the 20 test cases) 
+
+
+
+## Saving the predictions to file
+
+The prediction result was saved to disk for submission - 
+one file for each of the 20 test cases.
+
+```{r}
+answers = rep("A", 20)
+ 
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("../submission/problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(predComb)
+```
+
+
+## References
+
+1 [caret package - Classification and Regression Training](https://cran.r-project.org/web/packages/caret/index.html)
+
+2 [The caret Package](https://topepo.github.io/caret/)
