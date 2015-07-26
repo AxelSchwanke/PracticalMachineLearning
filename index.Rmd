@@ -1,15 +1,15 @@
 ---
+title: "Human Activity Prediction Based on Wearable Device Sensor Data"
 output: html_document
-title: Activity Prediction Based on Wearable Device Sensor Data
-subtitle: Prediction Assignment Writeup
-date: 2015-07-16
+date: '2015-07-26'
+subtitle: Coursera Practical Machine Learning - Prediction Assignment Writeup
 ---
 
 ## Summary
 
-This study used data from wearable device sensors to predict human activity.
-A combined model (randomForest, gbm, treebag) was used to achieve an
-estimated out-of-sample error on the cross-validation dataset of less than 1%.
+This study uses data from wearable device sensors to predict human activity.
+A combined model (randomForest, gbm, treebag) is used to achieve an
+misclassification error rate of less than 0.5%.
 
 
 
@@ -22,31 +22,49 @@ different ways.
 More information for this study is available from the website: 
 http://groupware.les.inf.puc-rio.br/har. 
 
-The training data for this project are available here: 
-https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
-
-The test data are available here: 
-https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
-
-The datasets contain 5 activity classes:
+The training data for this project is available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv.
+The training data is separated into a training set and a test set.
+The validation data is available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv.
+The datasets contain 5 activity classes to be predicted:
 sitting-down (A), standing-up (B), standing (C), walking (D), and sitting (E).
 
 Both data sets were downloaded on July 15. 2015.
 
 The goal of this study is to predict the human activity ("classe" variable) 
-on the test data cases.
+on the 20 validation data cases.
+
 
 This report describes
 
-* how a combined model is built
+* how the base models are build
+* how the combined model is created
 * how cross-validation is used
 * what the expected out-of-sample error is
 
-The model is than used to predict the activity of 
-20 test cases in the test data set.
+The combined model is used to predict the activity of the
+20 cases in the validation data set.
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+require(foreach)
+require(iterators)
+require(parallel)
+require(doParallel)
+require(caret)
+require(randomForest)
+require(gbm)
+require(ipred)
+require(plyr)
+require(e1071)
+```
 
 
-```{r, echo=FALSE, results='hide'}
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+require(doParallel)
+registerDoParallel(cores=3)
+
 ## set working directory
 setwd("E://MyDocuments/UNIVERSITIES/COURSERA - Practical Machine Learning/course project/code")
 getwd()
@@ -65,16 +83,16 @@ The training data contains 19622 rows and 160 columns.
 
 ## Cleaning the training data
 
-After some exploratory data analysis, several actions were taken to clean the data:
+After exploratory data analysis, several actions are taken to clean the data:
 ```{r}
-# remove column 'X' from data 
-data <- data[,-1]  # id for each case
+# remove identifier column 'X'
+data <- data[,-1]  
 
-# remove columns with mostly (>95%) NAs in it
-data <- data[,colSums(is.na(data)) < (nrow(data)*0.95)]
+# remove columns with more than 50% NAs in it
+data <- data[,colSums(is.na(data)) < (nrow(data)*0.50)]
 
-# remove columns which contains mostly (>95%) empty cells
-data <- data[,colSums(data=="") < (nrow(data)*0.95)]
+# remove columns which contains more than 50% empty cells
+data <- data[,colSums(data=="") < (nrow(data)*0.50)]
 dim(data)
 ```
 
@@ -83,168 +101,169 @@ The resulting training data set contains now only 59 columns.
 
 ## Get a random sample of the training data
 
-The training data set contains about 20000 rows.
-This takes very long to train the different models.
-Therefore a sample of 2000 rows is drawn for further processing.
+The training data contains about 20000 rows.
+It takes very long to train prediction models with this large dataset.
+Therefore a random sample of 5000 rows is taken for further processing.
 Exploratory analysis showed that this is sufficient for building 
-the prediction models.
+the different prediction models.
 
 ```{r}
 set.seed(98765)  # set seed for reproducability
-sampleLength <- 2000
+sampleLength <- 5000
 dataSample <- data[sample(nrow(data),sampleLength),]
 ```
 
 
-## Sub-divide the training data into a training and validation set
+## Sub-divide the training data into a training set and test set
 
-The training data is sub-divided into a training set (75%) and a
-validation set (25%).
+The training data is then sub-divided into a training set (75%) and a
+test set (25%).
 The training set is used to train the models.
-The validation set is used to estimate the out-of-sample error.
-
-```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
-require(caret)
-require(randomForest)
-require(gbm)
-require(ipred)
-require(plyr)
-```
-
+The test set is used to estimate the out-of-sample error of the models.
 ```{r}
-# divide the random sample into training and validation set
-inTrain = createDataPartition(dataSample$classe, p = 3/4)[[1]]
+inTrain = createDataPartition(dataSample$classe, p = 0.75)[[1]]
 training = dataSample[ inTrain,]
-validation = dataSample[-inTrain,]
-dim(training); dim(validation)
+test = dataSample[-inTrain,]
+# dim(training); dim(test)
 ```
 
 
-## Training different models
+## Training three base models
 
-Three methods will be used for training the models:
+Three models will be used for training:
 randomForest, gbm, and treebag
+(exploratory analysis showed that these models have low error rates).
+
+All three models are trained with standardized and imputed data.
+Cross validation with k=5 is used for randomForest and treebag models.
 
 ### randomForest model
 ```{r, results='hide'}
-modRf <- train(classe~., method="rf", data=training)
+modRf <- train(classe~., method="rf", data=training, preProcess=c("center","scale","knnImpute"),
+               trControl=trainControl(method="cv"), number=5 )
 # modRf$finalModel$confusion
 ```
 
 ### gbm model
 ```{r, results='hide'}
 # gbm
-modGbm <- train(classe~., method="gbm", data=training)
+modGbm <- train(classe~., method="gbm", data=training, verbose=FALSE, preProcess=c("center","scale","knnImpute"))
 # modGbm$finalModel
 ```
 
 ### treebag model
 ```{r results='hide', warning=FALSE}
-modTreebag <- train(classe~., method="treebag", data=training)
+modTreebag <- train(classe~., method="treebag", data=training, preProcess=c("center","scale","knnImpute"),
+                    trControl=trainControl(method="cv"), number=5 )
 # modTreebag$finalModel
 ```
 
 
-## Cross-validate the different models
+
+## Evaluating the different models
 
 To get an estimation of the out-of-sample error,
-the different models are tested on the validation data set
-(the out-of-sample error is the error rate of a model on a completely new data set).
-Confusion matrix was used to determine the error rate (1-accuracy).
+the different models are evaluated on the test set.
+Confusion matrix is used to determine the error rate (1 - accuracy).
 
 ### randomForest model
 ```{r}
-predictRf <- predict(modRf, validation)
-cmRf <- confusionMatrix(predictRf, validation$classe)
+predictRf <- predict(modRf, test)
+cmRf <- confusionMatrix(predictRf, test$classe)
 acc <- cmRf$overall[[1]]
 errorRf <- 1-acc
 errorRf
 ```
 The estimated out-of-sample error of the randomForest model is `r errorRf`.
+The 95% CI is (`r cmRf$overall[[3]]`, `r cmRf$overall[[4]]`)
 
 
 ### gbm model
 ```{r}
-predictGbm <- predict(modGbm, validation)
-cmGbm <- confusionMatrix(predictGbm, validation$classe)
+predictGbm <- predict(modGbm, test)
+cmGbm <- confusionMatrix(predictGbm, test$classe)
 acc <- cmGbm$overall[[1]]
 errorGbm <- 1-acc
 errorGbm
 ```
 The estimated out-of-sample error of the gbm model is `r errorGbm`.
+The 95% CI is (`r cmGbm$overall[[3]]`, `r cmGbm$overall[[4]]`)
+
 
 ### treebag model
 ```{r}
-predictTreebag <- predict(modTreebag, validation)
-cmTreebag <- confusionMatrix(predictTreebag, validation$classe)
+predictTreebag <- predict(modTreebag, test)
+cmTreebag <- confusionMatrix(predictTreebag, test$classe)
 acc <- cmTreebag$overall[[1]]
 errorTreebag <- 1-acc
 errorTreebag
 ```
 The estimated out-of-sample error of the treebag model is `r errorTreebag`.
+The 95% CI is (`r cmTreebag$overall[[3]]`, `r cmTreebag$overall[[4]]`)
+
 
 
 ## Fitting a combined model
 
-The results of the 3 models are now used as data to train a combined model 
-(method: randomForest).
-The the out-of-sample error of the combined model is determined.
+The three base models are now used to train a combined model (method: randomForest).
+The dataset used contains the predictions results of the three base models.
 
 ```{r}
-combResults <- data.frame(predictRf, predictGbm, predictTreebag, classe=validation$classe)
+combResults <- data.frame(predictRf, predictGbm, predictTreebag, classe=test$classe)
 modComb <- train(classe ~.,method="rf",data=combResults)
+
 predictComb <- predict(modComb,combResults)
-cmComb <- confusionMatrix(predictComb, validation$classe)
+cmComb <- confusionMatrix(predictComb, test$classe)
 acc <- cmComb$overall[[1]]
 errorComb <- 1-acc
 errorComb
 ```
 The estimated out-of-sample error of the combined model is `r errorComb`.
+The 95% CI is (`r cmComb$overall[[3]]`, `r cmComb$overall[[4]]`)
+
 
 
 ## Evaluation of the models
 
 The out-of-sample errors of the different models - 
-calculated on the validation data - are:
+calculated on the test data - are:
 
 * randomForest model:   `r errorRf`
 * gbm model:            `r errorGbm`
 * treebag model:        `r errorTreebag`
 * Combined model:       `r errorComb`
 
-The model with the smallest out-of-sample error estimation is the combined model.
-
-Therefore the combined model will be used for predicting the 
-human activity (classe variable) on the test data set.
-The estimation of the error is expected to be equal or higher than `r errorComb`.
+As expected the combined model has the smallest out-of-sample error estimation.
 
 
-## Predicting activity on the test data
 
-The 3 different models were used to predict the classe of the testing data test cases.
-The testing data contains 20 different test cases.
+## Predicting activity on the validation data
+
+The combined model is used to predict the classe of the validation data cases.
 
 
-### Loading the test data
+
+### Loading the validation data
 ```{r}
-test=read.csv("../data/pml-testing.csv")
-dim(test)
+validation=read.csv("../data/pml-testing.csv")
+dim(validation)
 ```
-The test data contains 20 cases.
+The validation data set contains 20 test cases.
 
-### Predicting the activity (classe) of the test cases
 
-The combined model is based on the prediction results of the three base models.
-Therefore the activity is first predicted for these base models.
+### Predicting the activity of the validation data cases
+
+As the combined model is based on the prediction results of the three base models,
+the activity is first predicted for the base models.
 
 ```{r}
-predRf <- predict(modRf, test)
-predGbm <- predict(modGbm, test)
-predTreebag <- predict(modTreebag, test)
+predRf <- predict(modRf, validation)
+predGbm <- predict(modGbm, validation)
+predTreebag <- predict(modTreebag, validation)
 ```
 
-Based on these prediction results the combined model was used to predict the 
-final result of the classe variable - used for submission.
+The prediction results are used to form a new dataset for the combined model,
+which is then used to predict the final result of the classe variable - used for submission.
 ```{r}
 combResults <- data.frame(predictRf=predRf, predictGbm=predGbm, predictTreebag=predTreebag)
 predComb <- predict(modComb,combResults)
@@ -256,18 +275,16 @@ predComb
 # B A B A A E D B A A B C B A E E A B B B
 ```
 
-The prediction result: `r predComb` (20 classe values for the 20 test cases) 
+The prediction result for the 20 validation data cases: `r predComb`
 
 
 
 ## Saving the predictions to file
 
-The prediction result was saved to disk for submission - 
-one file for each of the 20 test cases.
+The prediction result is saved to disk for submission - 
+one file for each of the 20 cases.
 
 ```{r}
-answers = rep("A", 20)
- 
 pml_write_files = function(x){
   n = length(x)
   for(i in 1:n){
