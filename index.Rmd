@@ -1,5 +1,5 @@
 ---
-title: "Human Activity Prediction Based on Wearable Device Sensor Data"
+title: "Human Activity Prediction Based on Wearable Device Sensors"
 output: html_document
 date: '2015-07-26'
 subtitle: Coursera Practical Machine Learning - Prediction Assignment Writeup
